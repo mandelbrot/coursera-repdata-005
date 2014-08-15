@@ -1,0 +1,282 @@
+---
+output: html_document
+---
+# Analysis of Storm Affects on Population Health and Economy in USA
+
+## Introduction
+
+Storms and other severe weather events can cause both public health and economic problems for communities and municipalities. Many severe events can result in fatalities, injuries, and property damage, and preventing such outcomes to the extent possible is a key concern.
+
+This project involves exploring the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database. This database tracks characteristics of major storms and weather events in the United States, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage.
+
+
+## Data Processing
+### Analysis
+Sum aggregates of damages will provide a meaninful measure for our analysis.  
+
+Population health (HEALTHDAMAGES) for each event is obtained after cumulative sum of reported injuries and fatilities for each year between 1950 - 2011. Economic affect (DMGCASH) for each event is obtained after cumlative sum of crop and property damage and after applying appropiate multipler. The results are then sorted and top 25 events and their values are presented. Each storm data event is first grouped into a class and then the sums are obtained for each class.
+
+### Loading
+There is also some documentation of the database available: https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2Fpd01016005curr.pdf https://d396qusza40orc.cloudfront.net/repdata%2Fpeer2_doc%2FNCDC%20Storm%20Events-FAQ%20Page.pdf
+The data used for this analysis is available: https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2.  
+
+```{r, echo=TRUE, cache=TRUE}
+#repdata-data-StormData.csv.bz2 is obtained from https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2
+data <- read.csv(bzfile("repdata-data-StormData.csv.bz2"))
+```
+
+### Processing Health Affects
+Get only health affects 
+```{r, echo=TRUE,fig.height=10, fig.width=10}
+library(ggplot2)
+library(data.table)
+library(xtable)
+health <- data[data$FATALITIES > 0 | data$INJURIES > 0, 
+                         c("EVTYPE", "INJURIES", "FATALITIES")]
+health$EVTYPE2 <- as.factor(toupper(health$EVTYPE))    
+```
+
+Calculate health affects (HEALTHDAMAGES)
+```{r, echo=TRUE,fig.height=10, fig.width=10,results='asis'}
+health$HEALTHDAMAGES <- health$FATALITIES + health$INJURIES;
+health.sum <- tapply(health$HEALTHDAMAGES, health$EVTYPE2, sum)
+health.sum <- data.frame(EVTYPE2=names(health.sum), 
+                            HEALTHDAMAGES=health.sum, row.names=NULL)
+health.sum <- health.sum[order(health.sum$HEALTHDAMAGES, 
+                                     decreasing=TRUE), ]
+xt <- xtable(health.sum)
+print(xt, type="html", include.rownames=FALSE)
+
+```
+
+### Processing Economic Affects
+Extract economic affects
+```{r,echo=TRUE, fig.height=10, fig.width=10}
+economic <- data[data$PROPDMG > 0 | data$CROPDMG > 0, 
+                         c("EVTYPE", "PROPDMG","PROPDMGEXP", "CROPDMG","CROPDMGEXP")]
+economic$EVTYPE2 <- as.factor(toupper(economic$EVTYPE))    
+```
+
+Calculate economic damages (DMGCASH).  
+
+The numeric values and its multiple are present in different columns. The multipler can be either character (e.g "H", "K", "M" or "B" for hunderds, thousands, millions or billions) or exponent values. We assume the multiplier == 1 when it does not fall into either of the above two classes. 
+```{r,echo=TRUE,warning=FALSE, comment=NA, fig.height=10, fig.width=10,results='asis'}
+economic$PROPDMGEXP <- as.factor(toupper(as.character(economic$PROPDMGEXP)))
+economic$CROPDMGEXP <- as.factor(toupper(as.character(economic$CROPDMGEXP)))
+
+dvals <- unique(union(economic$PROPDMGEXP, economic$CROPDMGEXP))
+DMGEXP <- numeric(18)
+names(DMGEXP) <- dvals
+DMGEXP[names(DMGEXP) %in% c("", "+", "-", "?")] <- 0
+DMGEXP["H"] <- 2
+DMGEXP["K"] <- 3
+DMGEXP["M"] <- 6
+DMGEXP["B"] <- 9
+
+economic$PROPDMGCASH <- economic$PROPDMG * (10 ^ DMGEXP[economic$PROPDMGEXP])
+economic$CROPDMGCASH <- economic$CROPDMG * (10 ^ DMGEXP[economic$CROPDMGEXP])
+economic$DMGCASH <- economic$CROPDMGCASH + economic$PROPDMGCASH
+#sum(is.na(economic$DMGCASH))
+economic.sum <- tapply(economic$DMGCASH, economic$EVTYPE2, sum)
+economic.sum <- data.frame(EVTYPE2=names(economic.sum),
+                          DMGCASH=economic.sum, row.names=NULL)
+economic.sum <- economic.sum[order(economic.sum$DMGCASH, decreasing=TRUE), ]
+xt <- xtable(economic.sum)
+print(xt, type="html", include.rownames=FALSE)
+```
+
+### Processing Event Class Affects
+
+Make groups by events.
+```{r, echo=TRUE}
+groups <- function (sd) {
+    heat            <- grep("HEAT|HYPERTHERMIA", sd$EVTYPE2, ignore.case=TRUE)
+    fire            <- grep("FIRE", sd$EVTYPE2, ignore.case=TRUE)
+    drought         <- grep("DROUGHT", sd$EVTYPE2, ignore.case=TRUE)
+    coastal         <- grep("CURRENT|SURF|SEAS|WAVE|MARINE", sd$EVTYPE2, ignore.case=TRUE)
+    lightning       <- grep("LIGHTNING", sd$EVTYPE2, ignore.case=TRUE)
+    rain            <- grep("RAIN|LANDSLIDE|MUDSLIDE|AVALANCH?E", sd$EVTYPE2, ignore.case=TRUE)
+    flood           <- grep("FLOOD|TSUNAMI|WATER|FLD", sd$EVTYPE2, ignore.case=TRUE)
+    fog             <- grep("FOG", sd$EVTYPE2, ignore.case=TRUE)
+    snow.cold       <- grep("SNOW|COLD|HYPOTHERMIA|WINTER|HAIL|BLIZZARD|ICE|ICY|FREEZ|FROST|GLAZE|WINTRY", 
+                            sd$EVTYPE2, ignore.case=TRUE)
+    blizzard        <- grep("BLIZZARD", sd$EVTYPE2, ignore.case=TRUE)
+    tornado         <- grep("TORNADO", sd$EVTYPE2, ignore.case=TRUE)
+    thunderstorm    <- grep("THUNDERSTORM|TSTM", sd$EVTYPE2, ignore.case=TRUE) 
+    hurricane       <- setdiff(grep("HURRICANE|TYPHOON", sd$EVTYPE2, 
+                                    ignore.case=TRUE), thunderstorm)   
+    storm           <- setdiff(grep("STORM", sd$EVTYPE2, ignore.case=TRUE),
+                               union(thunderstorm, c(blizzard, hurricane)))
+    wind            <- setdiff(grep("WIND", sd$EVTYPE2, ignore.case=TRUE), thunderstorm)
+    accounted <- unique(c(tornado, heat, snow.cold, drought, flood, lightning, fire, rain, fog, coastal,
+                          thunderstorm, wind, hurricane, blizzard, storm))
+    others <- setdiff(1:nrow(sd), accounted)
+    
+    groups <- data.frame()
+    groups <- rbind(groups, data.frame(group="TORNADO", EVTYPE2=unique(sd[tornado, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="HEAT", EVTYPE2=unique(sd[heat, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="SNOW/COLD", EVTYPE2=unique(sd[snow.cold, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="DROUGHT", EVTYPE2=unique(sd[drought, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="FLOOD", EVTYPE2=unique(sd[flood, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="LIGHTNING", EVTYPE2=unique(sd[lightning, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="FIRE", EVTYPE2=unique(sd[fire, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="RAIN", EVTYPE2=unique(sd[rain, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="FOG", EVTYPE2=unique(sd[fog, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="COASTAL", EVTYPE2=unique(sd[coastal, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="THUNDERSTORM", 
+                                       EVTYPE2=unique(sd[thunderstorm, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="WIND", EVTYPE2=unique(sd[wind, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="HURRICANE", EVTYPE2=unique(sd[hurricane, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="BLIZZARD", EVTYPE2=unique(sd[blizzard, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="OTHER STORMS", EVTYPE2=unique(sd[storm, c("EVTYPE2")])))
+    groups <- rbind(groups, data.frame(group="OTHER", EVTYPE2=unique(sd[others, c("EVTYPE2")])))
+    groups
+}   
+```
+
+Calculate health affects by storm event classes
+```{r, echo=TRUE, fig.height=10, fig.width=10,results='asis'}
+health.grp <- groups(health)
+health.mrg <- merge(health.sum, health.grp, 
+                       by.x="EVTYPE2", by.y="EVTYPE2", 
+                       all.x=TRUE, all.y=FALSE)
+
+health.mrg.sum <- tapply(health.mrg$HEALTHDAMAGES, health.mrg$group, sum)
+health.mrg.sum <- data.frame(GROUP=names(health.mrg.sum), 
+                            HEALTHDAMAGES=health.mrg.sum, row.names=NULL)
+xt <- xtable(health.mrg.sum)
+print(xt, type="html", include.rownames=FALSE)
+```
+
+Calculate economic affects by storm event classes
+
+```{r, echo=TRUE, fig.height=10, fig.width=10,results='asis'}
+economic.grp <- groups(economic)
+economic.mrg <- merge(economic.sum, economic.grp, 
+                       by.x="EVTYPE2", by.y="EVTYPE2", 
+                       all.x=TRUE, all.y=FALSE)
+
+economic.mrg.sum <- tapply(economic.mrg$DMGCASH, economic.mrg$group, sum)
+economic.mrg.sum <- data.frame(GROUP=names(economic.mrg.sum),
+                              DMGCASH=economic.mrg.sum, row.names=NULL)
+xt <- xtable(economic.mrg.sum)
+print(xt, type="html", include.rownames=FALSE)
+```
+
+## Results
+
+### Health Affects
+
+Show top health affects
+```{r, echo=TRUE,fig.height=10, fig.width=10}
+health.sum.top <- head(health.sum, n=25)
+health.sum.top$HEALTHDAMAGES <- health.sum.top$HEALTHDAMAGES / 1000
+
+sdh.gp <- ggplot(health.sum.top, aes(x=EVTYPE2, y=HEALTHDAMAGES)) +
+    xlab("Events") + 
+    ylab("Health affects in Thousands") + 
+    ggtitle(paste("Top", nrow(health.sum.top), 
+                  "strom related health affects in USA from 1950 - 2011")) +
+    geom_bar(stat="identity", fill=rainbow(n=length(health.sum.top$EVTYPE2))) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5))
+
+sdh.gp
+```
+
+### Economic Affects
+
+Show top economic affects
+```{r,echo=TRUE, fig.height=10, fig.width=10}
+economic.sum.top <- head(economic.sum, n=25)
+economic.sum.top$DMGCASH <- economic.sum.top$DMGCASH / (10^9)
+
+sde.gp <- ggplot(economic.sum.top, aes(x=EVTYPE2, y=DMGCASH)) +
+    xlab("Events") + 
+    ylab("Economic affects in Billions") + 
+    ggtitle(paste("Top", nrow(economic.sum.top), 
+                  "strom related economic affects in USA from 1950 - 2011")) +
+    geom_bar(stat="identity", fill=rainbow(n=length(economic.sum.top$EVTYPE2))) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5))
+
+sde.gp
+```
+
+### Event Class Affects
+
+We use multiplot function, which is obtained from http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/
+```{r, echo=FALSE}
+# Multiple plot function
+# Obtained from : http://www.cookbook-r.com/Graphs/Multiple_graphs_on_one_page_(ggplot2)/
+#
+# ggplot objects can be passed in ..., or to plotlist (as a list of ggplot objects)
+# - cols:   Number of columns in layout
+# - layout: A matrix specifying the layout. If present, 'cols' is ignored.
+#
+# If the layout is something like matrix(c(1,2,3,3), nrow=2, byrow=TRUE),
+# then plot 1 will go in the upper left, 2 will go in the upper right, and
+# 3 will go all the way across the bottom.
+#
+multiplot <- function(..., plotlist=NULL, file, cols=1, layout=NULL) {
+  require(grid)
+
+  # Make a list from the ... arguments and plotlist
+  plots <- c(list(...), plotlist)
+
+  numPlots = length(plots)
+
+  # If layout is NULL, then use 'cols' to determine layout
+  if (is.null(layout)) {
+    # Make the panel
+    # ncol: Number of columns of plots
+    # nrow: Number of rows needed, calculated from # of cols
+    layout <- matrix(seq(1, cols * ceiling(numPlots/cols)),
+                    ncol = cols, nrow = ceiling(numPlots/cols))
+  }
+
+ if (numPlots==1) {
+    print(plots[[1]])
+
+  } else {
+    # Set up the page
+    grid.newpage()
+    pushViewport(viewport(layout = grid.layout(nrow(layout), ncol(layout))))
+
+    # Make each plot, in the correct location
+    for (i in 1:numPlots) {
+      # Get the i,j matrix positions of the regions that contain this subplot
+      matchidx <- as.data.frame(which(layout == i, arr.ind = TRUE))
+
+      print(plots[[i]], vp = viewport(layout.pos.row = matchidx$row,
+                                      layout.pos.col = matchidx$col))
+    }
+  }
+}
+```
+
+Show health and economic affects by storm event classes 
+
+```{r, echo=TRUE, fig.height=10, fig.width=10}
+health.mrg.sum$HEALTHDAMAGES <- health.mrg.sum$HEALTHDAMAGES / 1000
+economic.mrg.sum$DMGCASH <- economic.mrg.sum$DMGCASH / (10^9)
+
+sdh.grp.gp <- ggplot(health.mrg.sum, aes(x=GROUP, y=HEALTHDAMAGES)) +
+    xlab("Event Classes") + 
+    ylab("Health affects in Thousands") + 
+    ggtitle("Health affects") +
+    geom_bar(stat="identity", fill=rainbow(n=length(health.mrg.sum$GROUP))) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5))
+
+sde.grp.gp <- ggplot(economic.mrg.sum, aes(x=GROUP, y=DMGCASH)) +
+    xlab("Event Classes") + 
+    ylab("Economic affects in Billions") + 
+    ggtitle("Economic affects") +
+    geom_bar(stat="identity", fill=rainbow(n=length(economic.mrg.sum$GROUP))) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1, vjust=0.5))
+
+multiplot(sdh.grp.gp, sde.grp.gp, cols=2)
+```
+
+
+## Conclusion
+
+This paper presents the types of storm related events that are responsible for most negative affects in USA from 1950 to 2011.
